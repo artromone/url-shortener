@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	analyticsProto "github.com/artromone/url-shortener/proto/analyticsservice"
-	cacheProto "github.com/artromone/url-shortener/proto/cacheservice"
-	urlProto "github.com/artromone/url-shortener/proto/urlservice"
+	analyticsProto "github.com/artromone/url-shortener/proto/analytics_service"
+	cacheProto "github.com/artromone/url-shortener/proto/cache_service"
+	urlProto "github.com/artromone/url-shortener/proto/url_service"
 	"github.com/artromone/url-shortener/services/api-gateway/handlers"
 	"github.com/artromone/url-shortener/services/api-gateway/middleware"
 )

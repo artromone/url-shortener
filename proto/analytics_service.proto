@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package analyticsservice;
 
-option go_package = "github.com/yourname/url-shortener/proto/analyticsservice";
+option go_package = "github.com/artromone/url-shortener/proto/analytics_service";
 
 service AnalyticsService {
   rpc RecordClick(ClickEvent) returns (ClickResponse);

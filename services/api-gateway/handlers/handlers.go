@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	analyticsProto "github.com/artromone/url-shortener/proto/analyticsservice"
-	cacheProto "github.com/artromone/url-shortener/proto/cacheservice"
-	urlProto "github.com/artromone/url-shortener/proto/urlservice"
+	analyticsProto "github.com/artromone/url-shortener/proto/analytics_service"
+	cacheProto "github.com/artromone/url-shortener/proto/cache_service"
+	urlProto "github.com/artromone/url-shortener/proto/url_service"
 )
 
 type Handler struct {
@@ -127,7 +127,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 		"short_code":      shortCode,
 		"total_clicks":    resp.TotalClicks,
 		"unique_visitors": resp.UniqueVisitors,
-		"last_clicked_at":resp.LastClickedAt,
+		"last_clicked_at": resp.LastClickedAt,
 	})
 }
 

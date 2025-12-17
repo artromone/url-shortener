@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package cacheservice;
 
-option go_package = "github.com/yourname/url-shortener/proto/cacheservice";
+option go_package = "github.com/artromone/url-shortener/proto/cache_service";
 
 service CacheService {
   rpc Get(CacheGetRequest) returns (CacheGetResponse);

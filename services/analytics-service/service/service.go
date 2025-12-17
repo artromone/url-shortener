@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	pb "github.com/artromone/url-shortener/proto/analyticsservice"
+	pb "github.com/artromone/url-shortener/proto/analytics_service"
 	"github.com/artromone/url-shortener/services/analytics-service/repository"
 	"github.com/artromone/url-shortener/services/analytics-service/worker"
 )
