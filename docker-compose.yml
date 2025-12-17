@@ -27,15 +27,32 @@ services:
       timeout: 3s
       retries: 5
 
+  migrations:
+    image: migrate/migrate:v4.16.2
+    volumes:
+      - ./services/url-service/migrations:/migrations-url
+      - ./services/analytics-service/migrations:/migrations-analytics
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Running URL service migrations..."
+        migrate -path /migrations-url -database "postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable" up
+
+        echo "Running Analytics service migrations..."
+        migrate -path /migrations-analytics -database "postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable" up
+
+        echo "All migrations completed successfully!"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   url-service:
     build:
       context: .
       dockerfile: services/url-service/Dockerfile
-    ports:
-      - "50051:50051"
-    environment:
-      DATABASE_URL: postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable
     depends_on:
+      migrations:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     restart: on-failure
@@ -44,11 +61,9 @@ services:
     build:
       context: .
       dockerfile: services/analytics-service/Dockerfile
-    ports:
-      - "50052:50052"
-    environment:
-      DATABASE_URL: postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable
     depends_on:
+      migrations:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     restart: on-failure

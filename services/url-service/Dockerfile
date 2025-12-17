@@ -18,8 +18,11 @@ WORKDIR /root/
 COPY --from=builder /app/url-service .
 COPY services/url-service/migrations /migrations
 
-RUN wget -O /usr/local/bin/migrate https://github.com/golang-migrate/migrate/releases/download/v4.16.2/migrate.linux-amd64.tar.gz && \
-  tar -xzf /usr/local/bin/migrate && \
+# Download and install migrate CLI - correct URL format
+RUN wget -O migrate.tar.gz https://github.com/golang-migrate/migrate/releases/download/v4.16.2/migrate.linux-amd64.tar.gz && \
+  tar -xzf migrate.tar.gz && \
+  mv migrate /usr/local/bin/migrate && \
+  rm migrate.tar.gz && \
   chmod +x /usr/local/bin/migrate
 
 EXPOSE 50051
