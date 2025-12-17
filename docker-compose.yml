@@ -1,0 +1,86 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: urlshortener
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: urlshortener
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U urlshortener"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  url-service:
+    build:
+      context: .
+      dockerfile: services/url-service/Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      DATABASE_URL: postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  analytics-service:
+    build:
+      context: .
+      dockerfile: services/analytics-service/Dockerfile
+    ports:
+      - "50052:50052"
+    environment:
+      DATABASE_URL: postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  cache-service:
+    build:
+      context: .
+      dockerfile: services/cache-service/Dockerfile
+    ports:
+      - "50053:50053"
+    environment:
+      REDIS_ADDR: redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: on-failure
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      URL_SERVICE_ADDR: url-service:50051
+      ANALYTICS_SERVICE_ADDR: analytics-service:50052
+      CACHE_SERVICE_ADDR: cache-service:50053
+    depends_on:
+      - url-service
+      - analytics-service
+      - cache-service
+    restart: on-failure
+
+volumes:
+  postgres_data:

@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package cacheservice;
+
+option go_package = "github.com/yourname/url-shortener/proto/cacheservice";
+
+service CacheService {
+  rpc Get(CacheGetRequest) returns (CacheGetResponse);
+  rpc Set(CacheSetRequest) returns (CacheSetResponse);
+  rpc Delete(CacheDeleteRequest) returns (CacheDeleteResponse);
+}
+
+message CacheGetRequest {
+  string key = 1;
+}
+
+message CacheGetResponse {
+  string value = 1;
+  bool found = 2;
+}
+
+message CacheSetRequest {
+  string key = 1;
+  string value = 2;
+  int32 ttl_seconds = 3;
+}
+
+message CacheSetResponse {
+  bool success = 1;
+}
+
+message CacheDeleteRequest {
+  string key = 1;
+}
+
+message CacheDeleteResponse {
+  bool success = 1;
+}

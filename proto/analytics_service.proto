@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package analyticsservice;
+
+option go_package = "github.com/yourname/url-shortener/proto/analyticsservice";
+
+service AnalyticsService {
+  rpc RecordClick(ClickEvent) returns (ClickResponse);
+  rpc GetStatistics(StatsRequest) returns (StatsResponse);
+}
+
+message ClickEvent {
+  string short_code = 1;
+  string ip_address = 2;
+  string user_agent = 3;
+  string referer = 4;
+  string country = 5;
+}
+
+message ClickResponse {
+  bool success = 1;
+}
+
+message StatsRequest {
+  string short_code = 1;
+}
+
+message StatsResponse {
+  int64 total_clicks = 1;
+  int64 unique_visitors = 2;
+  string last_clicked_at = 3;
+}
