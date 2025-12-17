@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package url_service;
 
-option go_package = "github.com/artromone/url-shortener/proto/url_service";
+option go_package = "proto/generated/url_service";
 
 service URLService {
   rpc CreateShortURL(CreateURLRequest) returns (CreateURLResponse);

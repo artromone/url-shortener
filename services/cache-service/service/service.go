@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"time"
+	"url-shortener/services/cache-service/cache"
 
-	pb "github.com/artromone/url-shortener/proto/cache_service"
-	"github.com/artromone/url-shortener/services/cache-service/cache"
+	pb "url-shortener/proto/generated/cache_service"
 )
 
 type Service struct {

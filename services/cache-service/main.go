@@ -7,13 +7,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"url-shortener/services/cache-service/cache"
+	"url-shortener/services/cache-service/service"
+
 	"github.com/go-redis/redis/v8"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	pb "github.com/artromone/url-shortener/proto/cache_service"
-	"github.com/artromone/url-shortener/services/cache-service/cache"
-	"github.com/artromone/url-shortener/services/cache-service/service"
+	pb "url-shortener/proto/generated/cache_service"
 )
 
 func main() {

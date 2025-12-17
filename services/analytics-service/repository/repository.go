@@ -3,9 +3,9 @@ package repository
 import (
 	"database/sql"
 	"time"
+	"url-shortener/services/analytics-service/models"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/artromone/url-shortener/services/analytics-service/worker"
 )
 
 type Repository struct {
@@ -26,7 +26,7 @@ type Stats struct {
 	LastClickedAt  *time.Time
 }
 
-func (r *Repository) BatchInsertClicks(events []worker.ClickEvent) error {
+func (r *Repository) BatchInsertClicks(events []models.ClickEvent) error {
 	if len(events) == 0 {
 		return nil
 	}

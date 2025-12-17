@@ -3,24 +3,14 @@ package worker
 import (
 	"log"
 	"sync"
-	"time"
-
-	"github.com/artromone/url-shortener/services/analytics-service/repository"
+	"url-shortener/services/analytics-service/models"
+	"url-shortener/services/analytics-service/repository"
 )
-
-type ClickEvent struct {
-	ShortCode string
-	IPAddress string
-	UserAgent string
-	Referer   string
-	Country   string
-	Timestamp time.Time
-}
 
 type WorkerPool struct {
 	workers    int
-	jobQueue   chan ClickEvent
-	batchQueue chan []ClickEvent
+	jobQueue   chan models.ClickEvent
+	batchQueue chan []models.ClickEvent
 	repo       *repository.Repository
 	wg         sync.WaitGroup
 	quit       chan struct{}
@@ -29,32 +19,19 @@ type WorkerPool struct {
 func New(workers, queueSize int, repo *repository.Repository) *WorkerPool {
 	return &WorkerPool{
 		workers:    workers,
-		jobQueue:   make(chan ClickEvent, queueSize),
-		batchQueue: make(chan []ClickEvent, 100),
+		jobQueue:   make(chan models.ClickEvent, queueSize),
+		batchQueue: make(chan []models.ClickEvent, 100),
 		repo:       repo,
 		quit:       make(chan struct{}),
 	}
 }
 
-func (p *WorkerPool) Start() {
-	go p.batcher()
-
-	for i := 0; i < p.workers; i++ {
-		p.wg.Add(1)
-		go p.worker(i)
-	}
-}
-
-func (p *WorkerPool) Submit(event ClickEvent) {
+func (p *WorkerPool) Submit(event models.ClickEvent) {
+	// Rest of the code remains the same
 	select {
-	case p.jobQueue = 100 {
-				p.batchQueue  0 {
-				p.batchQueue  0 {
-				p.batchQueue <- batch
-			}
-			close(p.batchQueue)
-			return
-		}
+	case p.jobQueue <- event:
+	default:
+		log.Println("Queue full, dropping event")
 	}
 }
 

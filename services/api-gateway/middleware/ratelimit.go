@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/artromone/url-shortener/pkg/ratelimit"
+	"url-shortener/pkg/ratelimit"
 )
 
 type RateLimiter struct {

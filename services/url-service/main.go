@@ -8,13 +8,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"url-shortener/services/url-service/repository"
+	"url-shortener/services/url-service/service"
+
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	pb "github.com/artromone/url-shortener/proto/urlservice"
-	"github.com/artromone/url-shortener/services/url-service/repository"
-	"github.com/artromone/url-shortener/services/url-service/service"
+	pb "url-shortener/proto/generated/url_service"
 )
 
 func main() {

@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	analyticsProto "github.com/artromone/url-shortener/proto/analytics_service"
-	cacheProto "github.com/artromone/url-shortener/proto/cache_service"
-	urlProto "github.com/artromone/url-shortener/proto/url_service"
+	analyticsProto "url-shortener/proto/generated/analytics_service"
+	cacheProto "url-shortener/proto/generated/cache_service"
+	urlProto "url-shortener/proto/generated/url_service"
 )
 
 type Handler struct {

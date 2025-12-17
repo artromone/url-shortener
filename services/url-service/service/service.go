@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"time"
 
-	pb "github.com/artromone/url-shortener/proto/urlservice"
-	pb "github.com/artromone/url-shortener/proto/urlservice"
-	"github.com/artromone/url-shortener/services/url-service/repository"
+	"url-shortener/pkg/shortcode"
+	"url-shortener/services/url-service/repository"
+
+	pb "url-shortener/proto/generated/url_service"
 )
 
 type Service struct {

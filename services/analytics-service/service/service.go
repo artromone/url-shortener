@@ -4,9 +4,10 @@ import (
 	"context"
 	"time"
 
-	pb "github.com/artromone/url-shortener/proto/analytics_service"
-	"github.com/artromone/url-shortener/services/analytics-service/repository"
-	"github.com/artromone/url-shortener/services/analytics-service/worker"
+	"url-shortener/services/analytics-service/repository"
+	"url-shortener/services/analytics-service/worker"
+
+	pb "url-shortener/proto/generated/analytics_service"
 )
 
 type Service struct {
