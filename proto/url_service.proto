@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package urlservice;
+package url_service;
 
 option go_package = "github.com/artromone/url-shortener/proto/url_service";
 

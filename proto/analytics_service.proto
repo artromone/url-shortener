@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package analyticsservice;
+package analytics_service;
 
 option go_package = "github.com/artromone/url-shortener/proto/analytics_service";
 

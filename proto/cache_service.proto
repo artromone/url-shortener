@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package cacheservice;
+package cache_service;
 
 option go_package = "github.com/artromone/url-shortener/proto/cache_service";
 

@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	pb "github.com/artromone/url-shortener/proto/cacheservice"
+	pb "github.com/artromone/url-shortener/proto/cache_service"
 	"github.com/artromone/url-shortener/services/cache-service/cache"
 	"github.com/artromone/url-shortener/services/cache-service/service"
 )
