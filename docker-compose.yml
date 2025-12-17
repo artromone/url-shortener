@@ -16,6 +16,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app-network
 
   redis:
     image: redis:7-alpine
@@ -26,47 +28,78 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - app-network
 
-  migrations:
+  # Run URL service migrations first
+  url-migrations:
     image: migrate/migrate:v4.16.2
     volumes:
-      - ./services/url-service/migrations:/migrations-url
-      - ./services/analytics-service/migrations:/migrations-analytics
+      - ./services/url-service/migrations:/migrations
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         echo "Running URL service migrations..."
-        migrate -path /migrations-url -database "postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable" up
-
-        echo "Running Analytics service migrations..."
-        migrate -path /migrations-analytics -database "postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable" up
-
-        echo "All migrations completed successfully!"
+        migrate -path /migrations -database "postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable" up
+        echo "URL migrations completed!"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - app-network
+
+  # Run Analytics service migrations separately
+  analytics-migrations:
+    image: migrate/migrate:v4.16.2
+    volumes:
+      - ./services/analytics-service/migrations:/migrations
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Running Analytics service migrations..."
+        migrate -path /migrations -database "postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable" up
+        echo "Analytics migrations completed!"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      url-migrations:
+        condition: service_completed_successfully
+    networks:
+      - app-network
 
   url-service:
     build:
       context: .
       dockerfile: services/url-service/Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      - DATABASE_URL=postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable
     depends_on:
-      migrations:
+      url-migrations:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
     restart: on-failure
+    networks:
+      - app-network
 
   analytics-service:
     build:
       context: .
       dockerfile: services/analytics-service/Dockerfile
+    ports:
+      - "50052:50052"
+    environment:
+      - DATABASE_URL=postgres://urlshortener:password@postgres:5432/urlshortener?sslmode=disable
     depends_on:
-      migrations:
+      analytics-migrations:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
     restart: on-failure
+    networks:
+      - app-network
 
   cache-service:
     build:
@@ -75,11 +108,13 @@ services:
     ports:
       - "50053:50053"
     environment:
-      REDIS_ADDR: redis:6379
+      - REDIS_ADDR=redis:6379
     depends_on:
       redis:
         condition: service_healthy
     restart: on-failure
+    networks:
+      - app-network
 
   api-gateway:
     build:
@@ -88,14 +123,20 @@ services:
     ports:
       - "8080:8080"
     environment:
-      URL_SERVICE_ADDR: url-service:50051
-      ANALYTICS_SERVICE_ADDR: analytics-service:50052
-      CACHE_SERVICE_ADDR: cache-service:50053
+      - URL_SERVICE_ADDR=url-service:50051
+      - ANALYTICS_SERVICE_ADDR=analytics-service:50052
+      - CACHE_SERVICE_ADDR=cache-service:50053
     depends_on:
       - url-service
       - analytics-service
       - cache-service
     restart: on-failure
+    networks:
+      - app-network
 
 volumes:
   postgres_data:
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,5 +1,9 @@
--- services/analytics-service/migrations/001_create_analytics_tables.up.sql
+#!/bin/bash
+# fix_migrations.sh - Manually create analytics tables
 
+echo "Creating analytics tables..."
+
+docker-compose exec -T postgres psql -U urlshortener -d urlshortener <<'EOF'
 -- Create clicks table for raw event data
 CREATE TABLE IF NOT EXISTS clicks (
     id BIGSERIAL PRIMARY KEY,
@@ -27,3 +31,10 @@ CREATE TABLE IF NOT EXISTS url_stats (
 
 -- Index for efficient updates
 CREATE INDEX IF NOT EXISTS idx_url_stats_updated_at ON url_stats(updated_at);
+
+-- Verify tables were created
+\dt
+EOF
+
+echo "Done! Checking tables..."
+docker-compose exec postgres psql -U urlshortener -d urlshortener -c "\dt"
