@@ -57,7 +57,7 @@ func (h *Handler) ShortenURL(c *gin.Context) {
 		return
 	}
 
-	h.cacheClient.Set(ctx, resp.ShortCode, req.URL, &cacheProto.CacheSetRequest{
+	_, _ = h.cacheClient.Set(ctx, &cacheProto.CacheSetRequest{
 		Key:        resp.ShortCode,
 		Value:      req.URL,
 		TtlSeconds: 3600,

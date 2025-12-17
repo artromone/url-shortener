@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"url-shortener/services/analytics-service/models"
 	"url-shortener/services/analytics-service/repository"
 	"url-shortener/services/analytics-service/worker"
 
@@ -24,7 +25,7 @@ func New(pool *worker.WorkerPool, repo *repository.Repository) *Service {
 }
 
 func (s *Service) RecordClick(ctx context.Context, req *pb.ClickEvent) (*pb.ClickResponse, error) {
-	event := worker.ClickEvent{
+	event := models.ClickEvent{
 		ShortCode: req.ShortCode,
 		IPAddress: req.IpAddress,
 		UserAgent: req.UserAgent,
