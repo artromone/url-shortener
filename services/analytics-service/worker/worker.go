@@ -4,21 +4,24 @@ import (
 	"log"
 	"sync"
 	"time"
-
 	"url-shortener/services/analytics-service/models"
-	"url-shortener/services/analytics-service/repository"
 )
 
 type WorkerPool struct {
 	workers    int
 	jobQueue   chan models.ClickEvent
 	batchQueue chan []models.ClickEvent
-	repo       *repository.Repository
+	repo       Repository
 	wg         sync.WaitGroup
 	quit       chan struct{}
 }
 
-func New(workers, queueSize int, repo *repository.Repository) *WorkerPool {
+type Repository interface {
+	BatchInsertClicks(events []models.ClickEvent) error
+	UpdateStats(shortCode string) error
+}
+
+func New(workers, queueSize int, repo Repository) *WorkerPool {
 	return &WorkerPool{
 		workers:    workers,
 		jobQueue:   make(chan models.ClickEvent, queueSize),
@@ -122,4 +125,3 @@ func (p *WorkerPool) Stop() {
 	close(p.quit)
 	p.wg.Wait()
 }
-

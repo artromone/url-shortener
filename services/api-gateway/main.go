@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
 	"url-shortener/services/api-gateway/handlers"
 	"url-shortener/services/api-gateway/middleware"
 
