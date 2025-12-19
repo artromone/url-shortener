@@ -1,480 +1,439 @@
-# URL Shortener v2 - Краткое ТЗ (PostgreSQL + sqlc + Chi + Redis + gRPC + Analytics + Concurrency)
+# URL Shortener - Техническое задание
 
 ## Описание проекта
 
-Сервис сокращения ссылок с системой аналитики. **Конкурентность критична**: обработка кликов должна быть асинхронной (не блокировать редирект), статистика пишется батчами для производительности.
+Микросервисная система для сокращения URL-адресов с аналитикой переходов. Система должна обрабатывать высокие нагрузки за счет асинхронной обработки событий, кэширования и батчевой записи в БД.
 
-## Базовые требования
+## Функциональные требования
 
-### Стек
+### Основная функциональность
+- Создание коротких ссылок из длинных URL
+- Редирект по короткому коду на оригинальный URL
+- Сбор статистики кликов (общее количество, уникальные посетители)
+- Удаление коротких ссылок
+- Опциональный срок действия ссылок
 
-- **PostgreSQL 14+** + sqlc v1.27+ + golang-migrate
-- **Chi router v5** для HTTP
-- **Redis** для счетчиков и кэша (обязательно)
-- **Многопоточность**: worker pools для analytics
-- **Опционально**: gRPC + отдельный Analytics Service
+### Нефункциональные требования
+- **Производительность**: Редирект должен выполняться < 10ms
+- **Масштабируемость**: Поддержка 10,000+ запросов/сек на редирект
+- **Асинхронность**: Запись кликов не должна блокировать редирект
+- **Отказоустойчивость**: Graceful shutdown с сохранением необработанных данных
 
+## Технологический стек
 
-### Архитектура
+### Обязательные технологии
+- **Язык**: Go 1.21+
+- **БД**: PostgreSQL 14+
+- **Кэш**: Redis 7+
+- **RPC**: gRPC + Protocol Buffers
+- **HTTP**: Gin или аналог
+- **Миграции**: golang-migrate
+- **Query Builder**: squirrel или аналог
+- **Контейнеризация**: Docker + Docker Compose
 
-```
-User → BFF/API → URL Service → PostgreSQL
-                      ↓            ↑
-                  Redis Cache   Analytics Worker Pool
-                      ↓            ↓
-                  Click Queue → Batch Insert
-```
+### Архитектурные требования
+- Микросервисная архитектура (минимум 4 сервиса)
+- Worker Pool для асинхронной обработки
+- Circuit Breaker для отказоустойчивости
+- Rate Limiting
+- Двухуровневое кэширование (Redis + in-memory)
 
+## Архитектура системы
 
-## Структура проекта
-
-```
-project/
-├── url-service/
-│   ├── main.go
-│   ├── sqlc.yaml
-│   ├── db/migrations/
-│   ├── db/queries/
-│   └── internal/
-│       ├── db/              # sqlc generated
-│       ├── worker/          # analytics workers
-│       ├── handler/         # chi handlers
-│       ├── shortener/       # hash generation
-│       └── cache/           # redis layer
-├── analytics-service/ (опц.)
-│   └── internal/grpc/
-└── proto/ (опц.)
-```
-
-
-## База данных
-
-### Миграция 000001_create_urls.up.sql
-
-```sql
-CREATE TABLE urls (
-    id SERIAL PRIMARY KEY,
-    short_code VARCHAR(10) UNIQUE NOT NULL,
-    original_url TEXT NOT NULL,
-    user_id INT,
-    expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE clicks (
-    id BIGSERIAL PRIMARY KEY,
-    short_code VARCHAR(10) NOT NULL,
-    clicked_at TIMESTAMPTZ DEFAULT NOW(),
-    ip_address INET,
-    user_agent TEXT,
-    referer TEXT,
-    country VARCHAR(2)
-);
-
-CREATE INDEX idx_urls_short_code ON urls(short_code);
-CREATE INDEX idx_clicks_short_code ON clicks(short_code);
-CREATE INDEX idx_clicks_clicked_at ON clicks(clicked_at);
-```
-
-
-### SQL запросы (db/queries/urls.sql)
-
-```sql
--- name: CreateURL :one
-INSERT INTO urls (short_code, original_url, expires_at)
-VALUES ($1, $2, $3) RETURNING *;
-
--- name: GetURLByShortCode :one
-SELECT * FROM urls WHERE short_code = $1 AND (expires_at IS NULL OR expires_at > NOW());
-
--- name: BatchInsertClicks :exec
-INSERT INTO clicks (short_code, clicked_at, ip_address, user_agent, referer)
-SELECT * FROM unnest($1::varchar[], $2::timestamptz[], $3::inet[], $4::text[], $5::text[]);
-
--- name: GetClickStats :one
-SELECT 
-    COUNT(*) as total_clicks,
-    COUNT(DISTINCT ip_address) as unique_visitors
-FROM clicks 
-WHERE short_code = $1 
-    AND clicked_at >= $2;
-```
-
-
-## Основные endpoints
-
-### URL Service (Chi)
-
-```
-POST   /api/shorten          # Создать короткую ссылку
-GET    /{shortCode}           # Редирект (асинхронная запись клика)
-GET    /api/stats/{shortCode} # Статистика
-DELETE /api/urls/{shortCode}  # Удалить
-```
-
-
-## Многопоточность (обязательно)
-
-### 1. Асинхронная обработка кликов
-
-**Критично**: редирект не должен ждать записи в БД.
-
-```go
-type ClickEvent struct {
-    ShortCode string
-    Timestamp time.Time
-    IP        string
-    UserAgent string
-    Referer   string
-}
-
-var clickQueue = make(chan ClickEvent, 10000)
-
-// Handler редиректа (быстрый)
-func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
-    code := chi.URLParam(r, "code")
+```mermaid
+graph TB
+    Client[HTTP Client]
+    Gateway[API Gateway :8080]
+    UrlSvc[URL Service :50051]
+    AnalyticsSvc[Analytics Service :50052]
+    CacheSvc[Cache Service :50053]
+    PG[(PostgreSQL :5432)]
+    Redis[(Redis :6379)]
+    Queue[Worker Pool + Batch Queue]
     
-    // 1. Получить URL из Redis/DB
-    url := h.cache.GetURL(code) // < 1ms
+    Client -->|HTTP| Gateway
+    Gateway -->|gRPC| UrlSvc
+    Gateway -->|gRPC| AnalyticsSvc
+    Gateway -->|gRPC| CacheSvc
     
-    // 2. Асинхронная отправка клика (не блокирует)
-    select {
-    case clickQueue <- ClickEvent{
-        ShortCode: code,
-        Timestamp: time.Now(),
-        IP:        r.RemoteAddr,
-        UserAgent: r.UserAgent(),
-        Referer:   r.Referer(),
-    }:
-    default:
-        // Очередь заполнена, логируем
-    }
+    UrlSvc -->|SQL| PG
+    CacheSvc -->|Cache| Redis
+    CacheSvc -->|In-Memory| CacheSvc
     
-    // 3. Быстрый редирект
-    http.Redirect(w, r, url, http.StatusMovedPermanently)
+    AnalyticsSvc -->|Submit Event| Queue
+    Queue -->|Batch Write| PG
+    
+    Gateway -.->|Async| AnalyticsSvc
+```
+
+## Структура микросервисов
+
+### 1. API Gateway (HTTP → gRPC)
+**Порт**: 8080  
+**Задачи**:
+- Прием HTTP запросов
+- Маршрутизация к gRPC сервисам
+- Rate Limiting (100 req/min на IP)
+- Асинхронная отправка событий кликов
+
+### 2. URL Service (gRPC)
+**Порт**: 50051  
+**Задачи**:
+- Генерация уникальных коротких кодов (7 символов, a-zA-Z0-9)
+- CRUD операции над URL
+- Проверка срока действия ссылок
+
+### 3. Analytics Service (gRPC)
+**Порт**: 50052  
+**Задачи**:
+- Прием событий кликов через gRPC
+- Worker Pool (10 воркеров) для обработки очереди
+- Батчевая запись в БД (100 событий или 1 секунда)
+- Расчет статистики
+
+### 4. Cache Service (gRPC)
+**Порт**: 50053  
+**Задачи**:
+- Двухуровневый кэш (Redis + in-memory)
+- TTL управление
+- Автоматическая инвалидация
+
+## API Endpoints
+
+### HTTP REST API (API Gateway)
+
+| Метод | Путь | Описание | Статус коды |
+|-------|------|----------|-------------|
+| POST | `/shorten` | Создать короткую ссылку | 200, 400, 500 |
+| GET | `/:shortCode` | Редирект на оригинальный URL | 301, 404, 410, 500 |
+| GET | `/stats/:shortCode` | Получить статистику | 200, 500 |
+| DELETE | `/:shortCode` | Удалить ссылку | 200, 500 |
+
+### POST /shorten
+
+**Request Body**:
+```
+{
+  "url": string (required, valid URL),
+  "user_id": string (optional),
+  "expires_in_days": integer (optional, > 0)
 }
 ```
 
-
-### 2. Worker Pool для батчевой записи
-
-```go
-type AnalyticsWorker struct {
-    queries    *db.Queries
-    clickQueue <-chan ClickEvent
-    batchSize  int
-    flushTime  time.Duration
-}
-
-func (w *AnalyticsWorker) Start(ctx context.Context) {
-    batch := make([]ClickEvent, 0, w.batchSize)
-    ticker := time.NewTicker(w.flushTime)
-    
-    for {
-        select {
-        case click := <-w.clickQueue:
-            batch = append(batch, click)
-            
-            // Если батч заполнен, записываем
-            if len(batch) >= w.batchSize {
-                w.flushBatch(ctx, batch)
-                batch = batch[:0]
-            }
-            
-        case <-ticker.C:
-            // Периодическая запись (даже если батч не полный)
-            if len(batch) > 0 {
-                w.flushBatch(ctx, batch)
-                batch = batch[:0]
-            }
-            
-        case <-ctx.Done():
-            w.flushBatch(ctx, batch)
-            return
-        }
-    }
-}
-
-func (w *AnalyticsWorker) flushBatch(ctx context.Context, batch []ClickEvent) {
-    // Batch INSERT через sqlc
-    shortCodes := make([]string, len(batch))
-    timestamps := make([]time.Time, len(batch))
-    ips := make([]string, len(batch))
-    // ... остальные поля
-    
-    for i, click := range batch {
-        shortCodes[i] = click.ShortCode
-        timestamps[i] = click.Timestamp
-        ips[i] = click.IP
-    }
-    
-    w.queries.BatchInsertClicks(ctx, shortCodes, timestamps, ips, ...)
+**Response 200**:
+```
+{
+  "short_code": string,
+  "short_url": string
 }
 ```
 
+### GET /:shortCode
 
-### 3. Redis для счетчиков (real-time)
+**Response**: HTTP 301 Redirect с заголовком Location  
+**Response 404**: URL не найден  
+**Response 410**: URL истек
 
-```go
-// Инкремент счетчика в Redis (быстро)
-func (c *Cache) IncrementClicks(ctx context.Context, shortCode string) {
-    key := "clicks:" + shortCode
-    c.rdb.Incr(ctx, key)
-    c.rdb.Expire(ctx, key, 24*time.Hour)
-}
+### GET /stats/:shortCode
 
-// Получить статистику (Redis + PostgreSQL)
-func (s *Service) GetStats(ctx context.Context, code string) (*Stats, error) {
-    var wg sync.WaitGroup
-    var redisClicks int64
-    var dbStats db.ClickStats
-    
-    // Параллельные запросы
-    wg.Add(2)
-    
-    go func() {
-        defer wg.Done()
-        redisClicks = s.cache.GetClickCount(ctx, code)
-    }()
-    
-    go func() {
-        defer wg.Done()
-        dbStats = s.queries.GetClickStats(ctx, code, time.Now().Add(-30*24*time.Hour))
-    }()
-    
-    wg.Wait()
-    
-    return &Stats{
-        TotalClicks: dbStats.TotalClicks + redisClicks,
-        UniqueVisitors: dbStats.UniqueVisitors,
-    }, nil
+**Response 200**:
+```
+{
+  "short_code": string,
+  "total_clicks": integer,
+  "unique_visitors": integer,
+  "last_clicked_at": string (RFC3339 или пусто)
 }
 ```
 
+### DELETE /:shortCode
 
-## Redis (обязательно)
-
-### Кэширование URL
-
-```go
-// Cache-aside pattern
-func (c *Cache) GetURL(shortCode string) (string, error) {
-    key := "url:" + shortCode
-    
-    // 1. Попытка из кэша
-    url, err := c.rdb.Get(ctx, key).Result()
-    if err == nil {
-        return url, nil
-    }
-    
-    // 2. Из БД
-    urlRecord, err := c.queries.GetURLByShortCode(ctx, shortCode)
-    if err != nil {
-        return "", err
-    }
-    
-    // 3. Сохранить в кэш
-    c.rdb.Set(ctx, key, urlRecord.OriginalURL, 1*time.Hour)
-    
-    return urlRecord.OriginalURL, nil
+**Response 200**:
+```
+{
+  "success": boolean
 }
 ```
 
+## Схема базы данных
 
-### Rate Limiting
+### Таблица: urls
 
-```go
-func (m *RateLimitMiddleware) Limit(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        key := "ratelimit:" + r.RemoteAddr
-        
-        count, _ := m.rdb.Incr(r.Context(), key).Result()
-        if count == 1 {
-            m.rdb.Expire(r.Context(), key, 1*time.Minute)
-        }
-        
-        if count > 100 {
-            http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-            return
-        }
-        
-        next.ServeHTTP(w, r)
-    })
+| Поле | Тип | Ограничения | Описание |
+|------|-----|-------------|----------|
+| id | BIGSERIAL | PRIMARY KEY | Уникальный идентификатор |
+| short_code | VARCHAR(10) | UNIQUE NOT NULL | Короткий код |
+| original_url | TEXT | NOT NULL | Оригинальный URL |
+| created_at | TIMESTAMP | DEFAULT NOW() | Дата создания |
+| expires_at | TIMESTAMP | NULL | Дата истечения (опционально) |
+| user_id | VARCHAR(50) | NULL | ID пользователя |
+| is_active | BOOLEAN | DEFAULT true | Активна ли ссылка |
+
+**Индексы**:
+- `idx_short_code` на `short_code`
+- `idx_created_at` на `created_at`
+
+### Таблица: clicks
+
+| Поле | Тип | Ограничения | Описание |
+|------|-----|-------------|----------|
+| id | BIGSERIAL | PRIMARY KEY | Уникальный идентификатор |
+| short_code | VARCHAR(10) | NOT NULL | Короткий код |
+| clicked_at | TIMESTAMP | NOT NULL DEFAULT NOW() | Время клика |
+| ip_address | INET | NULL | IP адрес |
+| user_agent | TEXT | NULL | User-Agent браузера |
+| referer | TEXT | NULL | HTTP Referer |
+| country | VARCHAR(2) | NULL | Код страны (ISO) |
+
+**Индексы**:
+- `idx_clicks_short_code` на `short_code`
+- `idx_clicks_clicked_at` на `clicked_at`
+- `idx_clicks_ip_address` на `ip_address`
+
+### Таблица: url_stats
+
+| Поле | Тип | Ограничения | Описание |
+|------|-----|-------------|----------|
+| short_code | VARCHAR(10) | PRIMARY KEY | Короткий код |
+| total_clicks | BIGINT | NOT NULL DEFAULT 0 | Общее количество кликов |
+| unique_visitors | BIGINT | NOT NULL DEFAULT 0 | Уникальные посетители |
+| last_clicked_at | TIMESTAMP | NULL | Последний клик |
+| updated_at | TIMESTAMP | NOT NULL DEFAULT NOW() | Время обновления |
+
+**Индекс**:
+- `idx_url_stats_updated_at` на `updated_at`
+
+## gRPC Services (Protocol Buffers)
+
+### URLService
+
+```
+service URLService {
+  rpc CreateShortURL(CreateURLRequest) returns (CreateURLResponse)
+  rpc GetOriginalURL(GetURLRequest) returns (GetURLResponse)
+  rpc DeleteURL(DeleteURLRequest) returns (DeleteURLResponse)
 }
 ```
 
+### AnalyticsService
 
-## gRPC (опционально)
-
-### proto/analytics.proto
-
-```protobuf
-syntax = "proto3";
-package analytics;
-
+```
 service AnalyticsService {
-  rpc RecordClick(ClickRequest) returns (ClickResponse);
-  rpc GetStats(StatsRequest) returns (StatsResponse);
-}
-
-message ClickRequest {
-  string short_code = 1;
-  string ip_address = 2;
-  string user_agent = 3;
-}
-
-message StatsResponse {
-  int64 total_clicks = 1;
-  int64 unique_visitors = 2;
-  repeated DailyStats daily_breakdown = 3;
+  rpc RecordClick(ClickEvent) returns (ClickResponse)
+  rpc GetStatistics(StatsRequest) returns (StatsResponse)
 }
 ```
 
+### CacheService
+
+```
+service CacheService {
+  rpc Get(CacheGetRequest) returns (CacheGetResponse)
+  rpc Set(CacheSetRequest) returns (CacheSetResponse)
+  rpc Delete(CacheDeleteRequest) returns (CacheDeleteResponse)
+}
+```
+
+## Алгоритм обработки клика
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway
+    participant Cache
+    participant URLService
+    participant Analytics
+    participant WorkerPool
+    participant DB
+
+    Client->>Gateway: GET /:shortCode
+    Gateway->>Cache: Get(shortCode)
+    
+    alt Cache Hit
+        Cache-->>Gateway: URL found
+    else Cache Miss
+        Gateway->>URLService: GetOriginalURL(shortCode)
+        URLService->>DB: SELECT from urls
+        DB-->>URLService: URL data
+        URLService-->>Gateway: URL + is_active
+        Gateway->>Cache: Set(shortCode, URL, 3600s)
+    end
+    
+    Gateway-->>Client: 301 Redirect (Location: URL)
+    
+    Gateway--)Analytics: RecordClick(event) [async, non-blocking]
+    Analytics->>WorkerPool: Submit to queue
+    
+    loop Batch Collection
+        WorkerPool->>WorkerPool: Collect 100 events OR 1 second
+    end
+    
+    WorkerPool->>DB: Batch INSERT clicks
+    WorkerPool->>DB: UPDATE url_stats
+```
+
+## Конкурентность и производительность
+
+### Worker Pool Architecture
+
+```mermaid
+graph LR
+    Gateway[API Gateway] -->|Submit Event| JobQueue[Job Queue<br/>chan size: 1000]
+    JobQueue --> Collector[Batch Collector<br/>Goroutine]
+    Collector -->|100 events<br/>or 1 sec| BatchQueue[Batch Queue]
+    
+    BatchQueue --> W1[Worker 1]
+    BatchQueue --> W2[Worker 2]
+    BatchQueue --> W3[Worker N]
+    
+    W1 --> DB[(PostgreSQL)]
+    W2 --> DB
+    W3 --> DB
+```
+
+### Требования к асинхронности
+- Редирект НЕ должен ждать записи клика в БД
+- Используйте buffered channels размером 1000+ для jobQueue
+- Worker pool: 10 горутин-воркеров
+- Батчинг: 100 событий ИЛИ 1 секунда (что наступит раньше)
+- Graceful shutdown: flush всех батчей перед остановкой
+
+### Кэширование
+- **L1 (in-memory)**: 5 минут TTL, очистка каждую минуту
+- **L2 (Redis)**: 1 час TTL
+- **Стратегия**: Cache-aside pattern
+- **Инвалидация**: При удалении URL из обоих уровней
+
+## Docker Compose конфигурация
+
+### Сервисы
+- `postgres`: PostgreSQL 15 Alpine
+- `redis`: Redis 7 Alpine
+- `url-migrations`: Запуск миграций для URL Service
+- `analytics-migrations`: Запуск миграций для Analytics Service
+- `url-service`: URL Service (зависит от postgres + migrations)
+- `analytics-service`: Analytics Service (зависит от postgres + migrations)
+- `cache-service`: Cache Service (зависит от redis)
+- `api-gateway`: API Gateway (зависит от всех сервисов)
+
+### Health checks
+- PostgreSQL: `pg_isready -U urlshortener` каждые 5 секунд
+- Redis: `redis-cli ping` каждые 5 секунд
+
+### Volumes
+- `postgres_data` для персистентности БД
+
+### Network
+- Все сервисы в одной сети `app-network`
+
+## Дополнительные компоненты
+
+### Rate Limiter
+- In-memory implementation с token bucket алгоритмом
+- 100 запросов в минуту на IP
+- Middleware для Gin
+- Автоматическая очистка старых bucket'ов
+
+### Circuit Breaker
+- Состояния: Closed, Open, Half-Open
+- Max failures: настраиваемый порог
+- Reset timeout: настраиваемый период
+- Используется для gRPC вызовов
+
+### Генератор коротких кодов
+- Длина: 7 символов
+- Charset: a-z, A-Z, 0-9 (62 символа)
+- Криптографически безопасный random (crypto/rand)
+- Collision handling: до 5 попыток генерации
+
+## Makefile команды
+
+Должны быть реализованы следующие команды:
+
+| Команда | Описание |
+|---------|----------|
+| `make proto` | Генерация Go кода из .proto файлов |
+| `make up` | Запуск всех сервисов через docker-compose |
+| `make down` | Остановка и удаление контейнеров |
+| `make logs` | Просмотр логов всех сервисов |
+| `make test` | Запуск тестов с race detector |
+| `make clean` | Очистка артефактов |
 
 ## Тестирование
 
-### 1. Race detector
+### Unit тесты
+- Покрытие > 70%
+- Race detector: `go test -race`
+- Тестирование worker pool и батчинга
 
-```bash
-go test -race ./...
-```
+### Load тесты
+- Apache Bench или аналог
+- 10,000 запросов на редирект за < 5 секунд
+- Проверка размера очереди и количества горутин
 
-
-### 2. Benchmark тесты
-
-```go
-func BenchmarkRedirectWithBatch(b *testing.B) {
-    // С батчингом
-    worker := NewAnalyticsWorker(queries, clickQueue, 100, 5*time.Second)
-    worker.Start(context.Background())
-    
-    b.ResetTimer()
-    b.RunParallel(func(pb *testing.PB) {
-        for pb.Next() {
-            handleRedirect(...)
-        }
-    })
-}
-
-func BenchmarkRedirectNoBatch(b *testing.B) {
-    // Без батчинга (прямая запись в DB)
-    b.RunParallel(func(pb *testing.PB) {
-        for pb.Next() {
-            handleRedirect(...)
-            db.InsertClick(...) // Блокирует
-        }
-    })
-}
-```
-
-**Ожидаемый результат**: батчинг в 10-50x быстрее.
-
-### 3. Load test
-
-```bash
-# Создать 1000 коротких ссылок
-ab -n 1000 -c 10 -p create.json http://localhost:8080/api/shorten
-
-# Симулировать клики (должно быть быстро)
-ab -n 10000 -c 100 http://localhost:8080/abc123
-```
-
-**Проверка**: 10000 редиректов за < 5 секунд (200-300ms без батчинга).
-
-### 4. Проверка батчинга
-
-```go
-func TestBatchInsertion(t *testing.T) {
-    // Отправить 150 кликов
-    for i := 0; i < 150; i++ {
-        clickQueue <- ClickEvent{...}
-    }
-    
-    time.Sleep(6 * time.Second) // Ждем flush
-    
-    // Проверить что был 1 batch INSERT, а не 150 отдельных
-    clicks := db.GetClicks(...)
-    assert.Equal(t, 150, len(clicks))
-    
-    // Проверить логи: должно быть "Flushed batch of 100" + "Flushed batch of 50"
-}
-```
-
-
-### 5. Мониторинг горутин
-
-```go
-r.Get("/debug/metrics", func(w http.ResponseWriter, r *http.Request) {
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "goroutines": runtime.NumGoroutine(),
-        "queue_size": len(clickQueue),
-        "redis_hits": cacheHits,
-    })
-})
-```
-
-**Ожидание**: 5-20 горутин (workers + chi), queue_size растет под нагрузкой.
+### Проверка корректности
+- Batch insert должен срабатывать при 100 событиях
+- Batch insert должен срабатывать через 1 секунду
+- Graceful shutdown сохраняет все события
+- Статистика корректна после нагрузочного теста
 
 ## Критерии оценки
 
-### Минимум (v1)
+### Минимум (проходной балл)
+- ✅ Все 4 микросервиса работают
+- ✅ Docker Compose поднимает систему
+- ✅ POST /shorten создает ссылки
+- ✅ GET /:shortCode редиректит
+- ✅ Миграции применяются автоматически
+- ✅ Redis кэширует URL
 
-- ✅ POST /api/shorten создает короткую ссылку
-- ✅ GET /{code} редиректит
-- ✅ PostgreSQL + sqlc работают
-- ✅ **Redis кэширует URLs**
-- ✅ **Клики записываются (хотя бы синхронно)**
+### Хорошо
+- ✅ + Worker pool с батчингом работает
+- ✅ + Редирект не блокируется записью клика
+- ✅ + Rate limiting функционирует
+- ✅ + Graceful shutdown
+- ✅ + go test -race проходит без ошибок
 
+### Отлично
+- ✅ + Load test: > 5000 req/s на редирект
+- ✅ + Двухуровневое кэширование
+- ✅ + Circuit breaker для gRPC
+- ✅ + Метрики: количество горутин, размер очереди
+- ✅ + Код структурирован по слоям (handler/service/repository)
 
-### Хорошо (v2)
+## Подсказки по реализации
 
-- ✅ + **Worker pool для кликов с батчингом**
-- ✅ + **Редирект не блокируется записью клика**
-- ✅ + **Redis счетчики для real-time статистики**
-- ✅ + **Rate limiting через Redis**
-- ✅ + **go test -race проходит**
-- ✅ + Graceful shutdown с flush оставшихся батчей
-
-
-### Отлично (v2+)
-
-- ✅ + **gRPC Analytics Service**
-- ✅ + **Benchmark показывает 10x улучшение**
-- ✅ + **Load test: 10k req/s на редирект**
-- ✅ + **Мониторинг: /debug/metrics endpoint**
-- ✅ + Custom short codes (vanity URLs)
-- ✅ + QR code generation
-- ✅ + Expiration URLs
-- ✅ + Geo-analytics (IP → country)
-
-
-## Простая проверка конкурентности
-
-```bash
-# 1. Запустить сервис
-make run
-
-# 2. Открыть метрики
-curl http://localhost:8080/debug/metrics
-
-# 3. Создать нагрузку
-ab -n 10000 -c 100 http://localhost:8080/test123
-
-# 4. Снова проверить метрики
-curl http://localhost:8080/debug/metrics
+### Структура проекта
+```
+project/
+├── services/
+│   ├── api-gateway/
+│   ├── url-service/
+│   ├── analytics-service/
+│   └── cache-service/
+├── proto/
+│   └── *.proto
+├── pkg/
+│   ├── shortcode/
+│   ├── ratelimit/
+│   └── circuitbreaker/
+├── docker-compose.yml
+├── Makefile
+└── go.mod
 ```
 
-**Если работает правильно**:
+### Ключевые пакеты для использования
+- `github.com/gin-gonic/gin` - HTTP router
+- `google.golang.org/grpc` - gRPC
+- `google.golang.org/protobuf` - Protocol Buffers
+- `github.com/lib/pq` - PostgreSQL driver
+- `github.com/go-redis/redis/v8` - Redis client
+- `github.com/Masterminds/squirrel` - SQL query builder
 
-- `queue_size` растет до 100-1000 под нагрузкой
-- `goroutines` = 5-20 (стабильно)
-- Редирект занимает < 5ms
-- В логах: "Flushed batch of 100 clicks"
-
-**Если НЕ работает**:
-
-- `queue_size` = 0 (нет очереди)
-- `goroutines` = 1-2
-- Редирект > 50ms
-- В логах: 10000 отдельных INSERT запросов
-# url-shortener
+### Важные детали реализации
+- Используйте `context.WithTimeout` для всех gRPC вызовов (5 секунд)
+- Connection pooling: `SetMaxOpenConns(25)`, `SetMaxIdleConns(5)`
+- Redis connection pool: `PoolSize: 10`
+- Buffered channels для очередей
+- `sync.WaitGroup` для graceful shutdown
+- Timer + Ticker для периодического flush батчей
